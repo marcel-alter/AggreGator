@@ -4,9 +4,11 @@ import (
 	"fmt"
 
 	"github.com/marcel-alter/AggreGator/internal/config"
+	"github.com/marcel-alter/AggreGator/internal/database"
 )
 
 type state struct {
+	db  *database.Queries
 	cfg *config.Config
 }
 
