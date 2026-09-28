@@ -7,6 +7,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -56,20 +57,37 @@ func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) (Feed, e
 }
 
 const getAllFeeds = `-- name: GetAllFeeds :many
-SELECT id, created_at, updated_at, name, url, user_id
+SELECT 
+    feeds.id, feeds.created_at, feeds.updated_at, feeds.name, url, user_id, users.id, users.created_at, users.updated_at, users.name,
+    users.name AS owner
 FROM 
     feeds
+    LEFT JOIN users ON feeds.user_id = users.id
 `
 
-func (q *Queries) GetAllFeeds(ctx context.Context) ([]Feed, error) {
+type GetAllFeedsRow struct {
+	ID          uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Name        string
+	Url         string
+	UserID      uuid.UUID
+	ID_2        uuid.NullUUID
+	CreatedAt_2 sql.NullTime
+	UpdatedAt_2 sql.NullTime
+	Name_2      sql.NullString
+	Owner       sql.NullString
+}
+
+func (q *Queries) GetAllFeeds(ctx context.Context) ([]GetAllFeedsRow, error) {
 	rows, err := q.db.QueryContext(ctx, getAllFeeds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Feed
+	var items []GetAllFeedsRow
 	for rows.Next() {
-		var i Feed
+		var i GetAllFeedsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.CreatedAt,
@@ -77,6 +95,11 @@ func (q *Queries) GetAllFeeds(ctx context.Context) ([]Feed, error) {
 			&i.Name,
 			&i.Url,
 			&i.UserID,
+			&i.ID_2,
+			&i.CreatedAt_2,
+			&i.UpdatedAt_2,
+			&i.Name_2,
+			&i.Owner,
 		); err != nil {
 			return nil, err
 		}
@@ -92,16 +115,36 @@ func (q *Queries) GetAllFeeds(ctx context.Context) ([]Feed, error) {
 }
 
 const getFeed = `-- name: GetFeed :one
-SELECT id, created_at, updated_at, name, url, user_id
+SELECT 
+    feeds.id, feeds.created_at, feeds.updated_at, feeds.name, url, user_id, users.id, users.created_at, users.updated_at, users.name,
+    users.name AS owner
+
 FROM 
     feeds
+    LEFT JOIN users ON feeds.user_id = users.id
 WHERE
-    name = $1
+    feeds.name = $1
+    OR
+    feeds.url = $1
 `
 
-func (q *Queries) GetFeed(ctx context.Context, name string) (Feed, error) {
+type GetFeedRow struct {
+	ID          uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Name        string
+	Url         string
+	UserID      uuid.UUID
+	ID_2        uuid.NullUUID
+	CreatedAt_2 sql.NullTime
+	UpdatedAt_2 sql.NullTime
+	Name_2      sql.NullString
+	Owner       sql.NullString
+}
+
+func (q *Queries) GetFeed(ctx context.Context, name string) (GetFeedRow, error) {
 	row := q.db.QueryRowContext(ctx, getFeed, name)
-	var i Feed
+	var i GetFeedRow
 	err := row.Scan(
 		&i.ID,
 		&i.CreatedAt,
@@ -109,6 +152,11 @@ func (q *Queries) GetFeed(ctx context.Context, name string) (Feed, error) {
 		&i.Name,
 		&i.Url,
 		&i.UserID,
+		&i.ID_2,
+		&i.CreatedAt_2,
+		&i.UpdatedAt_2,
+		&i.Name_2,
+		&i.Owner,
 	)
 	return i, err
 }

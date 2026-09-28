@@ -11,6 +11,17 @@ import (
 	"github.com/marcel-alter/AggreGator/internal/rss"
 )
 
+/*func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
+	return func(s *state, cmd command) error {
+		user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+		if err != nil {
+			return fmt.Errorf("something went wrong in middlewareLoggedIn: %v", err)
+		}
+		return
+	}
+}*/
+
+// handler Functions ↓↓↓↓↓↓↓↓↓↓↓
 func handlerLogin(s *state, cmd command) error {
 	//fmt.Printf("LOGIN TRIGGERED, len of args = %d\n", len(cmd.args))
 	if len(cmd.args) == 0 {
@@ -114,12 +125,15 @@ func handlerAddFeed(s *state, cmd command) error {
 	//question: what is a context.Context? what do we use it for?
 
 	if getU, err := s.db.GetFeed(ctx, cmd.args[0]); getU.Name == cmd.args[0] {
-		fmt.Printf("Feed %v already exist's! Shutting down now!\n", getU.Name)
+		fmt.Printf("Feed '%v' already exist's! Shutting down now!\n", getU.Name)
 		os.Exit(1)
 	} else if err != nil {
-		fmt.Printf("No Feed %v known yet! Status code: %v\n", cmd.args[0], err)
+		fmt.Printf("No Feed '%v' known yet! Status code: %v\n", cmd.args[0], err)
 	}
 	user, err := s.db.GetUser(ctx, s.cfg.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("Error getting current user data! %v", err)
+	}
 	feed := database.CreateFeedParams{
 		ID:        uuid.New(),
 		CreatedAt: time.Now(),
@@ -133,8 +147,17 @@ func handlerAddFeed(s *state, cmd command) error {
 	if err != nil {
 		return fmt.Errorf("Error: Couldn't Create Feed: %v", err)
 	}
-
-	fmt.Printf("Feed %v was created!\n", returnFeed.Name)
+	follow := database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID:    user.ID,
+		FeedID:    returnFeed.ID,
+	}
+	if _, err := s.db.CreateFeedFollow(ctx, follow); err != nil {
+		return fmt.Errorf("Something went wrong following user's own feed: %v", err)
+	}
+	fmt.Printf("Feed '%v' was created by '%v'!\n", returnFeed.Name, s.cfg.CurrentUserName)
 	return nil
 }
 
@@ -155,7 +178,85 @@ func handlerFeeds(s *state, cmd command) error {
 		if err != nil {
 			return fmt.Errorf("Error trying to get name from Feed with name '%v'. error: %v", name, err)
 		}
-		fmt.Printf("Feed: %v | URL: %v | from User: %v\n", name, url, userName.Name)
+		fmt.Printf("Feed: '%v' | URL: '%v' | from User: '%v'\n", name, url, userName.Name)
+	}
+	return nil
+}
+
+func handlerHelp(s *state, cmd command) error {
+	fmt.Println(`Available Commands:
+	login <user>    - let's you change to a different user
+	register <user> | let's you register a new user
+	users		- display's all registered users
+	reset		| delet's all registered users
+	addfeed		- creates a feed for the current user
+	feeds		| display's all feeds from all users
+	agg <URL>	- aggregates the contents of a website
+	help		| display's all command handlers
+	follow <URL>- let's the current user follow other user's feed's
+	following	| display's all follows current user is folling`)
+	return nil
+}
+
+func handlerFollow(s *state, cmd command) error {
+	if len(cmd.args) == 0 {
+		//fmt.Println("Login args 0 triggered")
+		return fmt.Errorf("Error: follow requieres a url argument!")
+	}
+	ctx := context.Background()
+	//getFF, err := s.db.GetFeedFollow(ctx, cmd.args[0])
+	if getFF, err := s.db.GetFeedFollow(ctx, cmd.args[0]); getFF.Url != cmd.args[0] {
+		fmt.Printf("Feed '%v' doesn't exist! Shutting down now!\n", getFF.Url)
+		os.Exit(1)
+	} else if getFF.UserName == s.cfg.CurrentUserName {
+		fmt.Printf("User already follows Feed '%v' owned by user '%v'! Status Code: %v\n", getFF.FeedName, getFF.CreatorName, err)
+		os.Exit(1)
+	}
+	user, err := s.db.GetUser(ctx, s.cfg.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("Error getting current user data! %v", err)
+	}
+	feed, err := s.db.GetFeed(ctx, cmd.args[0])
+	if err != nil {
+		return fmt.Errorf("Error getting current user's feed data! %v", err)
+	}
+	follow := database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+	}
+
+	returnFeedFollow, err := s.db.CreateFeedFollow(ctx, follow)
+	if err != nil {
+		return fmt.Errorf("Error: Couldn't Create FeedFollow: %v", err)
+	}
+	for _, item := range returnFeedFollow {
+		fmt.Printf("Feed '%v' by '%v' is now followed by current user: '%v' !\n", item.FeedName, item.CreatorName, s.cfg.CurrentUserName)
+	}
+	return nil
+}
+
+func handlerFollowing(s *state, cmd command) error {
+	ctx := context.Background()
+	allFollows, err := s.db.GetFeedFollowForUser(ctx, s.cfg.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("something went wrong wiht GetFeedFollowForUser! Error: %v", err)
+	}
+	if len(allFollows) == 0 {
+		fmt.Println("No Feeds followed yet!")
+		return nil
+	}
+	for _, oneFollow := range allFollows {
+		name := oneFollow.FeedName
+		url := oneFollow.Url
+		/*feed, err := s.db.GetFeed(ctx, url)
+		if err != nil {
+			return fmt.Errorf("something went wrong in handler following trying to fetch feed data: %v", err)
+		}*/
+
+		fmt.Printf("'%v follows Feed: %v | URL: %v | from User: %v\n", oneFollow.UserName, name, url, oneFollow.CreatorName)
 	}
 	return nil
 }

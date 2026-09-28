@@ -11,13 +11,22 @@ VALUES (
 RETURNING *;
 
 -- name: GetFeed :one
-SELECT *
+SELECT 
+    *,
+    users.name AS owner
+
 FROM 
     feeds
+    LEFT JOIN users ON feeds.user_id = users.id
 WHERE
-    name = $1;
+    feeds.name = $1
+    OR
+    feeds.url = $1;
 
 -- name: GetAllFeeds :many
-SELECT *
+SELECT 
+    *,
+    users.name AS owner
 FROM 
-    feeds;
+    feeds
+    LEFT JOIN users ON feeds.user_id = users.id;

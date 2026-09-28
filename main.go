@@ -29,6 +29,10 @@ func main() {
 	comms.register("agg", handlerAgg)
 	comms.register("addfeed", handlerAddFeed)
 	comms.register("feeds", handlerFeeds)
+	comms.register("help", handlerHelp)
+	comms.register("follow", handlerFollow)
+	comms.register("following", handlerFollowing)
+
 	if len(os.Args) < 2 {
 		log.Fatal("Error: No Command given! Type 'Help' for List of Commands")
 		return
