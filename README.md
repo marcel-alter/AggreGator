@@ -13,6 +13,17 @@ for PostgreSQL on Linux use command:
 to install gator use command:
 
     go install github.com/marcel-alter/AggreGator@latest
+
+Create a `.gatorconfig.json` file in your home directory with the following structure:
+
+```json
+{
+  "db_url": "postgres://username:@localhost:5432/database?sslmode=disable"
+}
+```
+
+Replace the values with your database connection string.
+
 \
 To use gator you will first need to register a User.\
 Use command: register <UserName>\
