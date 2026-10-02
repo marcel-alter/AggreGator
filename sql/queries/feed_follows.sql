@@ -45,3 +45,12 @@ INNER JOIN users AS followers ON feed_follows.user_id = followers.id
 INNER JOIN users AS creators ON feeds.user_id = creators.id
 WHERE
     followers.name = $1;
+
+-- name: DeleteFollowForUser :exec
+DELETE 
+FROM
+    feed_follows
+WHERE 
+    user_id = $1
+    AND
+    feed_id = $2;

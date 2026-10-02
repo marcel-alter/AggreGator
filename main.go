@@ -11,7 +11,6 @@ import (
 )
 
 func main() {
-	//fmt.Printf("Reading from filePath ~/.gatorconfig.json\n")
 	cfg, err := config.Read()
 	if err != nil {
 		log.Fatalf("Error: Reading failed: %v", err)
@@ -27,11 +26,14 @@ func main() {
 	comms.register("reset", handlerReset)
 	comms.register("users", handlerUsers)
 	comms.register("agg", handlerAgg)
-	comms.register("addfeed", handlerAddFeed)
+	comms.register("addfeed", middlewareLoggedIn(handlerAddFeed))
 	comms.register("feeds", handlerFeeds)
 	comms.register("help", handlerHelp)
-	comms.register("follow", handlerFollow)
+	comms.register("follow", middlewareLoggedIn(handlerFollow))
 	comms.register("following", handlerFollowing)
+	comms.register("unfollow", middlewareLoggedIn(handlerUnfollow))
+	comms.register("aggurl", handlerAggUrl)
+	comms.register("browse", middlewareLoggedIn(handlerBrowse))
 
 	if len(os.Args) < 2 {
 		log.Fatal("Error: No Command given! Type 'Help' for List of Commands")

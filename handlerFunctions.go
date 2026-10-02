@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,15 +12,15 @@ import (
 	"github.com/marcel-alter/AggreGator/internal/rss"
 )
 
-/*func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
+func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
 	return func(s *state, cmd command) error {
 		user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
 		if err != nil {
 			return fmt.Errorf("something went wrong in middlewareLoggedIn: %v", err)
 		}
-		return
+		return handler(s, cmd, user)
 	}
-}*/
+}
 
 // handler Functions ↓↓↓↓↓↓↓↓↓↓↓
 func handlerLogin(s *state, cmd command) error {
@@ -105,18 +106,38 @@ func handlerUsers(s *state, cmd command) error {
 	}
 	return nil
 }
-
-func handlerAgg(s *state, cmd command) error {
-	ctx := context.Background()
-	rssFeed, err := rss.FetchFeed(ctx, "https://www.wagslane.dev/index.xml")
-	if err != nil {
-		return fmt.Errorf("Error using FetchFeed: %v\n", err)
+func handlerAggUrl(s *state, cmd command) error {
+	if len(cmd.args) == 0 {
+		return fmt.Errorf("Error: agg requieres a URL argument!")
 	}
-	fmt.Println(rssFeed)
+	aggregate, err := rss.FetchFeed(context.Background(), cmd.args[0])
+	if err != nil {
+		return fmt.Errorf("AggUrl failed with FetchFeed! Error: %v", err)
+	}
+	fmt.Printf("Name: %v | URL: %v\n", aggregate.Channel.Title, aggregate.Channel.Link)
 	return nil
 }
 
-func handlerAddFeed(s *state, cmd command) error {
+func handlerAgg(s *state, cmd command) error {
+
+	if len(cmd.args) == 0 {
+		return fmt.Errorf("Error: agg requieres a time argument! e.g 1h20m5s")
+	}
+	duration, err := time.ParseDuration(cmd.args[0])
+	if err != nil {
+		return fmt.Errorf("something went wrong in agg handler parsing time string '%v' to time. Error: %v", cmd.args[0], err)
+	}
+
+	ticker := time.NewTicker(duration)
+	for ; ; <-ticker.C {
+		scrapeFeeds(s)
+
+		fmt.Println("Scraped Feeds at ...", time.Now())
+	}
+	return nil
+}
+
+func handlerAddFeed(s *state, cmd command, user database.User) error {
 	if len(cmd.args) <= 1 {
 		//fmt.Println("Login args 0 triggered")
 		return fmt.Errorf("Error: addfeed requieres a name and url argument!")
@@ -124,16 +145,16 @@ func handlerAddFeed(s *state, cmd command) error {
 	ctx := context.Background()
 	//question: what is a context.Context? what do we use it for?
 
-	if getU, err := s.db.GetFeed(ctx, cmd.args[0]); getU.Name == cmd.args[0] {
-		fmt.Printf("Feed '%v' already exist's! Shutting down now!\n", getU.Name)
+	if checkFeed, err := s.db.GetFeed(ctx, cmd.args[1]); checkFeed.Name == cmd.args[0] {
+		fmt.Printf("Feed '%v' already exist's! Shutting down now!\n", checkFeed.Name)
 		os.Exit(1)
 	} else if err != nil {
-		fmt.Printf("No Feed '%v' known yet! Status code: %v\n", cmd.args[0], err)
+		fmt.Printf("No Feed '%v' known yet! Status code: %v\n", cmd.args[1], err)
 	}
-	user, err := s.db.GetUser(ctx, s.cfg.CurrentUserName)
+	/*agg, err := rss.FetchFeed(ctx, cmd.args[0])
 	if err != nil {
-		return fmt.Errorf("Error getting current user data! %v", err)
-	}
+		return fmt.Errorf("something went wrong in handlerAddFeed using FetchFeed! Error: %v", err)
+	}*/
 	feed := database.CreateFeedParams{
 		ID:        uuid.New(),
 		CreatedAt: time.Now(),
@@ -157,7 +178,7 @@ func handlerAddFeed(s *state, cmd command) error {
 	if _, err := s.db.CreateFeedFollow(ctx, follow); err != nil {
 		return fmt.Errorf("Something went wrong following user's own feed: %v", err)
 	}
-	fmt.Printf("Feed '%v' was created by '%v'!\n", returnFeed.Name, s.cfg.CurrentUserName)
+	fmt.Printf("Feed '%v' at '%v' was created by '%v'!\n", returnFeed.Name, returnFeed.Url, s.cfg.CurrentUserName)
 	return nil
 }
 
@@ -174,11 +195,12 @@ func handlerFeeds(s *state, cmd command) error {
 	for _, oneFeed := range allFeeds {
 		name := oneFeed.Name
 		url := oneFeed.Url
-		userName, err := s.db.GetUserFromId(ctx, oneFeed.UserID)
+		/*userName, err := s.db.GetUserFromId(ctx, oneFeed.UserID)
 		if err != nil {
 			return fmt.Errorf("Error trying to get name from Feed with name '%v'. error: %v", name, err)
-		}
-		fmt.Printf("Feed: '%v' | URL: '%v' | from User: '%v'\n", name, url, userName.Name)
+		}*/
+		//question: why does oneFeed.Owner print {users.name true}
+		fmt.Printf("Feed: '%v' | URL: '%v' | from User: '%v'\n", name, url, oneFeed.Owner.String)
 	}
 	return nil
 }
@@ -189,16 +211,19 @@ func handlerHelp(s *state, cmd command) error {
 	register <user> | let's you register a new user
 	users		- display's all registered users
 	reset		| delet's all registered users
-	addfeed		- creates a feed for the current user
+	addfeed <URL>- creates a feed for the current user
 	feeds		| display's all feeds from all users
-	agg <URL>	- aggregates the contents of a website
+	agg <time>	- starts an aggregation loop that iterates every <time> units
+	aggurl <URL>| aggregates the contents of a website
 	help		| display's all command handlers
 	follow <URL>- let's the current user follow other user's feed's
-	following	| display's all follows current user is folling`)
+	following	| display's all follows current user is folling
+	unfollow <URL> - let's the current user unfollow the named feed
+	browse		| display's all posts of all feeds the current user follows`)
 	return nil
 }
 
-func handlerFollow(s *state, cmd command) error {
+func handlerFollow(s *state, cmd command, user database.User) error {
 	if len(cmd.args) == 0 {
 		//fmt.Println("Login args 0 triggered")
 		return fmt.Errorf("Error: follow requieres a url argument!")
@@ -211,10 +236,6 @@ func handlerFollow(s *state, cmd command) error {
 	} else if getFF.UserName == s.cfg.CurrentUserName {
 		fmt.Printf("User already follows Feed '%v' owned by user '%v'! Status Code: %v\n", getFF.FeedName, getFF.CreatorName, err)
 		os.Exit(1)
-	}
-	user, err := s.db.GetUser(ctx, s.cfg.CurrentUserName)
-	if err != nil {
-		return fmt.Errorf("Error getting current user data! %v", err)
 	}
 	feed, err := s.db.GetFeed(ctx, cmd.args[0])
 	if err != nil {
@@ -257,6 +278,55 @@ func handlerFollowing(s *state, cmd command) error {
 		}*/
 
 		fmt.Printf("'%v follows Feed: %v | URL: %v | from User: %v\n", oneFollow.UserName, name, url, oneFollow.CreatorName)
+	}
+	return nil
+}
+
+func handlerUnfollow(s *state, cmd command, user database.User) error {
+	if len(cmd.args) == 0 {
+		return fmt.Errorf("Unfollow requires <URL> argument!")
+	}
+	ctx := context.Background()
+	feed, err := s.db.GetFeed(ctx, cmd.args[0])
+	if err != nil {
+		return fmt.Errorf("Error trying to GetFeed for unfollow: %v", err)
+	}
+	deletion := database.DeleteFollowForUserParams{
+		UserID: user.ID,
+		FeedID: feed.ID,
+	}
+	if err := s.db.DeleteFollowForUser(ctx, deletion); err != nil {
+		return fmt.Errorf("Error trying to delete follow by user '%v' to feed '%v' owned by '%v'! Error: %v", user.Name, feed.Name, feed.Owner, err)
+	}
+	return nil
+}
+
+func handlerBrowse(s *state, cmd command, user database.User) error {
+	var num int
+	if len(cmd.args) != 0 {
+		val, err := strconv.Atoi(cmd.args[0])
+		if err != nil {
+			return fmt.Errorf("'%v' is not a number\n", cmd.args[0])
+		}
+		num = val
+	} else {
+		num = 2
+	}
+
+	args := database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  int32(num),
+	}
+	posts, err := s.db.GetPostsForUser(context.Background(), args)
+	if err != nil {
+		return fmt.Errorf("something went wrong with GetPostsForUser! Error: %v", err)
+	}
+	if len(posts) == 0 {
+		fmt.Println("no posts fetched yet!")
+		return nil
+	}
+	for _, post := range posts {
+		fmt.Printf("Post: %v | URL: %v | published at: %v\n", post.Title, post.Url, post.PublishedAt)
 	}
 	return nil
 }

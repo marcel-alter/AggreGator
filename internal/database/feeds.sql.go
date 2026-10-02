@@ -23,7 +23,7 @@ VALUES (
     $5,
     $6
 )
-RETURNING id, created_at, updated_at, name, url, user_id
+RETURNING id, created_at, updated_at, name, url, user_id, last_fetched_at
 `
 
 type CreateFeedParams struct {
@@ -52,13 +52,14 @@ func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) (Feed, e
 		&i.Name,
 		&i.Url,
 		&i.UserID,
+		&i.LastFetchedAt,
 	)
 	return i, err
 }
 
 const getAllFeeds = `-- name: GetAllFeeds :many
 SELECT 
-    feeds.id, feeds.created_at, feeds.updated_at, feeds.name, url, user_id, users.id, users.created_at, users.updated_at, users.name,
+    feeds.id, feeds.created_at, feeds.updated_at, feeds.name, url, user_id, last_fetched_at, users.id, users.created_at, users.updated_at, users.name,
     users.name AS owner
 FROM 
     feeds
@@ -66,17 +67,18 @@ FROM
 `
 
 type GetAllFeedsRow struct {
-	ID          uuid.UUID
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	Name        string
-	Url         string
-	UserID      uuid.UUID
-	ID_2        uuid.NullUUID
-	CreatedAt_2 sql.NullTime
-	UpdatedAt_2 sql.NullTime
-	Name_2      sql.NullString
-	Owner       sql.NullString
+	ID            uuid.UUID
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	Name          string
+	Url           string
+	UserID        uuid.UUID
+	LastFetchedAt sql.NullTime
+	ID_2          uuid.NullUUID
+	CreatedAt_2   sql.NullTime
+	UpdatedAt_2   sql.NullTime
+	Name_2        sql.NullString
+	Owner         sql.NullString
 }
 
 func (q *Queries) GetAllFeeds(ctx context.Context) ([]GetAllFeedsRow, error) {
@@ -95,6 +97,7 @@ func (q *Queries) GetAllFeeds(ctx context.Context) ([]GetAllFeedsRow, error) {
 			&i.Name,
 			&i.Url,
 			&i.UserID,
+			&i.LastFetchedAt,
 			&i.ID_2,
 			&i.CreatedAt_2,
 			&i.UpdatedAt_2,
@@ -116,7 +119,7 @@ func (q *Queries) GetAllFeeds(ctx context.Context) ([]GetAllFeedsRow, error) {
 
 const getFeed = `-- name: GetFeed :one
 SELECT 
-    feeds.id, feeds.created_at, feeds.updated_at, feeds.name, url, user_id, users.id, users.created_at, users.updated_at, users.name,
+    feeds.id, feeds.created_at, feeds.updated_at, feeds.name, url, user_id, last_fetched_at, users.id, users.created_at, users.updated_at, users.name,
     users.name AS owner
 
 FROM 
@@ -129,17 +132,18 @@ WHERE
 `
 
 type GetFeedRow struct {
-	ID          uuid.UUID
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	Name        string
-	Url         string
-	UserID      uuid.UUID
-	ID_2        uuid.NullUUID
-	CreatedAt_2 sql.NullTime
-	UpdatedAt_2 sql.NullTime
-	Name_2      sql.NullString
-	Owner       sql.NullString
+	ID            uuid.UUID
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	Name          string
+	Url           string
+	UserID        uuid.UUID
+	LastFetchedAt sql.NullTime
+	ID_2          uuid.NullUUID
+	CreatedAt_2   sql.NullTime
+	UpdatedAt_2   sql.NullTime
+	Name_2        sql.NullString
+	Owner         sql.NullString
 }
 
 func (q *Queries) GetFeed(ctx context.Context, name string) (GetFeedRow, error) {
@@ -152,6 +156,7 @@ func (q *Queries) GetFeed(ctx context.Context, name string) (GetFeedRow, error) 
 		&i.Name,
 		&i.Url,
 		&i.UserID,
+		&i.LastFetchedAt,
 		&i.ID_2,
 		&i.CreatedAt_2,
 		&i.UpdatedAt_2,
@@ -159,4 +164,44 @@ func (q *Queries) GetFeed(ctx context.Context, name string) (GetFeedRow, error) 
 		&i.Owner,
 	)
 	return i, err
+}
+
+const getNextFeedToFetch = `-- name: GetNextFeedToFetch :one
+SELECT 
+    id, created_at, updated_at, name, url, user_id, last_fetched_at
+FROM 
+    feeds
+ORDER BY last_fetched_at NULLS FIRST, updated_at, created_at
+`
+
+func (q *Queries) GetNextFeedToFetch(ctx context.Context) (Feed, error) {
+	row := q.db.QueryRowContext(ctx, getNextFeedToFetch)
+	var i Feed
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Name,
+		&i.Url,
+		&i.UserID,
+		&i.LastFetchedAt,
+	)
+	return i, err
+}
+
+const markFeedFetched = `-- name: MarkFeedFetched :exec
+UPDATE feeds
+    SET updated_at = $1, last_fetched_at = $1
+WHERE
+    feeds.id = $2
+`
+
+type MarkFeedFetchedParams struct {
+	UpdatedAt time.Time
+	ID        uuid.UUID
+}
+
+func (q *Queries) MarkFeedFetched(ctx context.Context, arg MarkFeedFetchedParams) error {
+	_, err := q.db.ExecContext(ctx, markFeedFetched, arg.UpdatedAt, arg.ID)
+	return err
 }
